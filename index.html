@@ -42,104 +42,172 @@ let sessionId = null;
 /* ================= MOUSE TRACKING ================= */
 document.addEventListener("mousemove", e => {
     mouseData.push({
-        x:e.clientX,
-        y:e.clientY,
-        t:Date.now()
+        x: e.clientX,
+        y: e.clientY,
+        t: Date.now()
     });
-    if(mouseData.length>200)
+    if (mouseData.length > 200)
         mouseData.shift();
 });
 /* ================= NAVIGATION ================= */
-function showRegister(){
-    document.getElementById("menu").style.display="none";
-    document.getElementById("registerSection").style.display="block";
-    document.getElementById("loginSection").style.display="none";
-    document.getElementById("result").innerText="";
+function showRegister() {
+    document.getElementById("menu").style.display = "none";
+    document.getElementById("registerSection").style.display = "block";
+    document.getElementById("loginSection").style.display = "none";
+    document.getElementById("result").innerText = "";
 }
-function showLogin(){
-    document.getElementById("menu").style.display="none";
-    document.getElementById("loginSection").style.display="block";
-    document.getElementById("registerSection").style.display="none";
-    document.getElementById("result").innerText="";
+function showLogin() {
+    document.getElementById("menu").style.display = "none";
+    document.getElementById("loginSection").style.display = "block";
+    document.getElementById("registerSection").style.display = "none";
+    document.getElementById("result").innerText = "";
 }
-function goHome(){
+function goHome() {
     sessionId = null;
-    document.getElementById("menu").style.display="block";
-    document.getElementById("registerSection").style.display="none";
-    document.getElementById("loginSection").style.display="none";
-    document.getElementById("otpBox").style.display="none";
-    document.getElementById("result").innerText="";
+    localStorage.removeItem("session_token");
+    localStorage.removeItem("user_email");
+    document.getElementById("menu").style.display = "block";
+    document.getElementById("registerSection").style.display = "none";
+    document.getElementById("loginSection").style.display = "none";
+    document.getElementById("otpBox").style.display = "none";
+    document.getElementById("otp").value = "";
+    document.getElementById("result").innerText = "";
 }
 /* ================= REGISTER ================= */
-async function register(){
-const response = await fetch(`${API}/register`, {
-method:"POST",
-headers:{ "Content-Type":"application/json" },
-body:JSON.stringify({
-email:document.getElementById("reg_email").value,
-username:document.getElementById("reg_username").value,
-password:document.getElementById("reg_password").value
-})
-});
-const data = await response.json();
-document.getElementById("result").innerText = data.message;
+async function register() {
+    const email = document.getElementById("reg_email").value.trim();
+    const username = document.getElementById("reg_username").value.trim();
+    const password = document.getElementById("reg_password").value;
+    if (!email || !username || !password) {
+        document.getElementById("result").innerText = "Please fill in all fields.";
+        return;
+    }
+    try {
+        const response = await fetch(`${API}/register`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, username, password })
+        });
+        const data = await response.json();
+
+        if (data.message === "User Registered Successfully") {
+            document.getElementById("result").innerText = "✅ Registered successfully! You can now login.";
+        } else if (data.message === "EMAIL_ALREADY_EXISTS") {
+            document.getElementById("result").innerText = "❌ Email already registered.";
+        } else {
+            document.getElementById("result").innerText = data.message;
+        }
+    } catch (err) {
+        document.getElementById("result").innerText = "❌ Network error: " + err.message;
+    }
 }
+
 /* ================= LOGIN ================= */
-async function login(){
-if(!navigator.geolocation){
-alert("Location not supported");
-return;
+async function login() {
+    const email = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value;
+
+    if (!email || !password) {
+        document.getElementById("result").innerText = "Please enter email and password.";
+        return;
+    }
+
+    document.getElementById("result").innerText = "Locating...";
+
+    // FIX: gracefully handle geolocation denial
+    const getPosition = () => new Promise((resolve) => {
+        if (!navigator.geolocation) {
+            resolve({ latitude: 0.0, longitude: 0.0 });
+            return;
+        }
+        navigator.geolocation.getCurrentPosition(
+            pos => resolve({
+                latitude: pos.coords.latitude,
+                longitude: pos.coords.longitude
+            }),
+            () => resolve({ latitude: 0.0, longitude: 0.0 }) // denied → default
+        );
+    });
+
+    const { latitude, longitude } = await getPosition();
+
+    try {
+        document.getElementById("result").innerText = "Logging in...";
+
+        const response = await fetch(`${API}/login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password, latitude, longitude, mouse: mouseData })
+        });
+        const data = await response.json();
+
+        if (data.decision === "ENTER_OTP") {
+            sessionId = data.session_id;
+            document.getElementById("otpBox").style.display = "block";
+            document.getElementById("result").innerText = "📧 OTP sent to your email.";
+        } else if (data.decision === "WRONG_PASSWORD") {
+            document.getElementById("result").innerText = "❌ Wrong password.";
+        } else if (data.decision === "USER_NOT_FOUND") {
+            document.getElementById("result").innerText = "❌ User not found.";
+        } else {
+            document.getElementById("result").innerText = data.decision;
+        }
+    } catch (err) {
+        document.getElementById("result").innerText = "❌ Network error: " + err.message;
+    }
 }
-navigator.geolocation.getCurrentPosition(
-async position => {
-const response = await fetch(`${API}/login`, {
-method:"POST",
-headers:{ "Content-Type":"application/json" },
-body:JSON.stringify({
-email:document.getElementById("email").value,
-password:document.getElementById("password").value,
-latitude:position.coords.latitude,
-longitude:position.coords.longitude,
-mouse:mouseData
-})
-});
-const data = await response.json();
-if(data.decision==="ENTER_OTP"){
-    sessionId = data.session_id;   // STORE SESSION ID
-    document.getElementById("otpBox").style.display="block";
-    document.getElementById("result").innerText="OTP sent to email";
-}
-else{
-    document.getElementById("result").innerText = data.decision;
-}
-});
-}
+
 /* ================= OTP VERIFY ================= */
-async function verifyOTP(){
-const response = await fetch(`${API}/verify-otp`, {
-method:"POST",
-headers:{ "Content-Type":"application/json" },
-body:JSON.stringify({
-email:document.getElementById("email").value,
-otp:document.getElementById("otp").value,
-session_id: sessionId
-})
-});
-const data = await response.json();
-if(data.confidence!==undefined){
-document.getElementById("result").innerText =
-"✅ Login Successful\nConfidence: "
-+ Number(data.confidence).toFixed(3);
-}
-else if(data.status==="SESSION_EXPIRED"){
-    document.getElementById("result").innerText="Session expired. Please login again.";
-}
-else{
-    document.getElementById("result").innerText="OTP Failed";
-}
+async function verifyOTP() {
+    const email = document.getElementById("email").value.trim();
+    const otp = document.getElementById("otp").value.trim();
+
+    if (!otp) {
+        document.getElementById("result").innerText = "Please enter the OTP.";
+        return;
+    }
+
+    if (!sessionId) {
+        document.getElementById("result").innerText = "Session lost. Please login again.";
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API}/verify-otp`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, otp, session_id: sessionId })
+        });
+        const data = await response.json();
+
+        if (data.session_token) {
+            // Store token for future authenticated requests
+            localStorage.setItem("session_token", data.session_token);
+            localStorage.setItem("user_email", email);
+
+            if (data.message === "ALLOW") {
+                document.getElementById("result").innerText =
+                    "✅ Login Successful\nConfidence: " + Number(data.confidence).toFixed(3);
+            } else if (data.message === "MONITOR") {
+                document.getElementById("result").innerText =
+                    "⚠️ Login Allowed (monitored)\nConfidence: " + Number(data.confidence).toFixed(3);
+            }
+        } else if (data.message === "BLOCK") {
+            document.getElementById("result").innerText =
+                "🚫 Access Denied\nConfidence too low: " + Number(data.confidence).toFixed(3);
+        } else if (data.status === "SESSION_EXPIRED") {
+            document.getElementById("result").innerText = "⏰ Session expired. Please login again.";
+            document.getElementById("otpBox").style.display = "none";
+            sessionId = null;
+        } else if (data.status === "OTP_FAILED") {
+            document.getElementById("result").innerText = "❌ Incorrect OTP. Please try again.";
+        } else {
+            document.getElementById("result").innerText = "❌ Something went wrong.";
+        }
+    } catch (err) {
+        document.getElementById("result").innerText = "❌ Network error: " + err.message;
+    }
 }
 </script>
 </body>
 </html>
-
-
